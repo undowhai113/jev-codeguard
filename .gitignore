@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.codegraph/
+.claude/
+docs/superpowers/
+.DS_Store
+Thumbs.db
+*.tgz
+*.log
+.mcp-jev-cache.json
+.env
+.env.*
+!.env.example
+# Jev event logs and snapshots (may contain workspace paths, commands and specs)
+events-snapshot.jsonl
+*.jsonl
