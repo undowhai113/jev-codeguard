@@ -92,6 +92,8 @@ export interface SkillRemediationExcerpt {
   vector: string;
   probability: number;
   skillFile: string;
+  /** Where the excerpt came from: the user's installed skills, the copy bundled in this package, or built-in guidance only. */
+  skillSource?: "local" | "bundled" | "builtin";
   title: string;
   excerpt: string;
 }

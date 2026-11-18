@@ -1,0 +1,3 @@
+# Vendored third-party skills are kept byte-for-byte identical to upstream
+# (their sha256 is verified by tests), so never normalise their line endings.
+skills/vendor/** -text

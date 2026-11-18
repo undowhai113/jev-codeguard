@@ -949,7 +949,7 @@ export function createMcpJevServer(client?: JevClient): McpServer {
   const dispatcher = new McpJevDispatcher(client);
   const server = new McpServer({
     name: "mcp-jev",
-    version: "1.0.0"
+    version: "1.1.0"
   });
 
   server.tool(

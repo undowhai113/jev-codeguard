@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`mcp-jev v1.0.0 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
+  console.log(`mcp-jev v1.1.0 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
 
 Usage:
   mcp-jev serve                                                        Start MCP stdio server + auto-start Radar Portal (default)

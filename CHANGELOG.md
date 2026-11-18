@@ -2,6 +2,19 @@
 
 All notable changes to `mcp-jev` are documented in this file.
 
+## [1.1.0] - 2026-11-18
+
+### Added
+- **Bundled remediation skills (`skills/vendor/`):** `jev_audit_code` now works out of the box after `npx jev-codeguard setup`. When a vector crosses its threshold and you have not installed the skill yourself, it quotes the bundled copy of OpenAI's `security-best-practices` (Apache-2.0, `SKILL.md` + 10 framework references), GreenSock's `gsap-performance` (MIT) and Matt Pocock's `codebase-design` (MIT). Files are vendored verbatim at pinned commits by `scripts/vendor-skills.mjs`, ship with their upstream licenses, and are listed in `THIRD_PARTY_NOTICES.md`.
+- **`skillSource` on every remediation excerpt** (`"local" | "bundled" | "builtin"`) so agents and the Radar can tell where guidance came from.
+
+### Changed
+- Skill lookup is now per file: your installed skills win, and any missing file falls back to the bundled copy (previously a partial local install silently dropped to one-line built-in guidance). The bundled directory is resolved from the package location, not the current working directory.
+- README and Vietnamese summary describe the real lookup order instead of implying a local `SKILL.md` library is always present.
+
+### Tests
+- Added coverage for bundled fallback, local override, built-in last resort, per-stack section resolution, and SHA-256 integrity of every vendored file against `skills/vendor/manifest.json`.
+
 ## [1.0.0] - 2026-11-17
 
 ### Added

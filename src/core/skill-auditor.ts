@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { JevClient } from "./jev-client.js";
 import { JEV_POLICY } from "./policy-config.js";
 import type {
@@ -139,6 +140,13 @@ const STACK_TO_SKILL_FILE: Record<CodeStack, string> = {
   general: "security-best-practices/SKILL.md"
 };
 
+/**
+ * Third-party remediation skills shipped inside this package (skills/vendor/), vendored
+ * verbatim at pinned commits by scripts/vendor-skills.mjs. See THIRD_PARTY_NOTICES.md.
+ * Resolved from this module's location (dist/src/core/), never from process.cwd().
+ */
+export const BUNDLED_SKILLS_DIR = fileURLToPath(new URL("../../../skills/vendor/", import.meta.url));
+
 export function resolveSkillsDir(customDir?: string): string {
   const home = os.homedir();
   if (customDir && customDir.trim().length > 0) {
@@ -171,7 +179,7 @@ export function resolveSkillsDir(customDir?: string): string {
       return dir;
     }
   }
-  return candidates[0];
+  return BUNDLED_SKILLS_DIR;
 }
 
 export function detectCodeStack(codeOrDiff: string, filePath = ""): CodeStack {
@@ -312,7 +320,8 @@ function extractMatchingSectionFromMarkdown(
 export function extractSkillRemediation(
   skillsDir: string,
   stack: CodeStack,
-  violatedVectors: Array<{ vector: string; probability: number }>
+  violatedVectors: Array<{ vector: string; probability: number }>,
+  bundledDir: string = BUNDLED_SKILLS_DIR
 ): SkillRemediationExcerpt[] {
   const allVectors = [...SECURITY_AUDIT_VECTORS, GSAP_ANIMATION_VECTOR];
   const excerpts: SkillRemediationExcerpt[] = [];
@@ -331,30 +340,45 @@ export function extractSkillRemediation(
       relativeSkillPath = "codebase-design/SKILL.md";
     }
 
-    const fullPath = path.join(skillsDir, relativeSkillPath);
-    let extractedText: string | null = null;
+    // The user's own installed skills win; the copy bundled in this package fills any gap.
+    const isBundled = (dir: string) => path.resolve(dir) === path.resolve(bundledDir);
+    const lookups: Array<[string, "local" | "bundled"]> = [[skillsDir, isBundled(skillsDir) ? "bundled" : "local"]];
+    if (!isBundled(skillsDir)) lookups.push([bundledDir, "bundled"]);
 
-    if (fs.existsSync(fullPath)) {
-      try {
-        const md = fs.readFileSync(fullPath, "utf8");
-        extractedText = extractMatchingSectionFromMarkdown(md, meta.searchKeywords);
-      } catch {
-        extractedText = null;
+    let extractedText: string | null = null;
+    let skillSource: SkillRemediationExcerpt["skillSource"] = "builtin";
+    for (const [dir, source] of lookups) {
+      extractedText = readSkillSection(path.join(dir, relativeSkillPath), meta.searchKeywords);
+      if (extractedText) {
+        skillSource = source;
+        break;
       }
     }
 
+    const sourceLabel =
+      skillSource === "bundled" ? `${path.basename(relativeSkillPath)}, bundled with jev-codeguard` : path.basename(relativeSkillPath);
     excerpts.push({
       vector: item.vector,
       probability: item.probability,
       skillFile: relativeSkillPath,
+      skillSource,
       title: meta.title,
       excerpt: extractedText
-        ? `${meta.fallbackGuidance}\n\n--- [Extracted from ${path.basename(relativeSkillPath)}] ---\n${extractedText}`
+        ? `${meta.fallbackGuidance}\n\n--- [Extracted from ${sourceLabel}] ---\n${extractedText}`
         : meta.fallbackGuidance
     });
   }
 
   return excerpts;
+}
+
+function readSkillSection(fullPath: string, keywords: string[]): string | null {
+  try {
+    if (!fs.existsSync(fullPath)) return null;
+    return extractMatchingSectionFromMarkdown(fs.readFileSync(fullPath, "utf8"), keywords);
+  } catch {
+    return null;
+  }
 }
 
 export interface AuditCodeInput {

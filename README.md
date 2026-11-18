@@ -19,7 +19,7 @@ It pairs your frontier **System-2** coding agent with **[TypeSafe AI's Jev](http
 
 1. **🛡️ Pre-Execution Command Firewall (`jev_guard_action` & `jev-gate`):** Evaluates literal shell commands for blast radius, destructiveness, and secret exfiltration before execution — automatically rejecting English prose summaries so agents cannot disguise risky commands.
 2. **🔍 Zero-Token Local Git Diff Verifier (`jev_verify_diff`):** Reads staged, unstaged, and untracked changes directly from disk (zero agent tokens spent echoing diffs), enriches them with AST symbol skeletons, callers, and linter diagnostics, and flags regressions before commit.
-3. **🔒 Skill-Backed Security & Quality Auditor (`jev_audit_code`):** Checks 9 OWASP/AppSec vectors + architecture + 60fps GSAP animation rules in ~150ms, lazily injecting remediation excerpts from your local `SKILL.md` library **only** when a risk crosses `P >= 0.55`.
+3. **🔒 Skill-Backed Security & Quality Auditor (`jev_audit_code`):** Checks 9 OWASP/AppSec vectors + architecture + 60fps GSAP animation rules in ~150ms, lazily injecting remediation excerpts **only** when a risk crosses `P >= 0.55` — from your own installed skills, or from the licensed skills bundled with the package (OpenAI `security-best-practices`, GreenSock `gsap-performance`, Matt Pocock `codebase-design`).
 4. **✂️ Context Pruner & Workflow Router (`jev_prune_context` & `jev_route_task`):** Scores up to 100 candidate files/skills in a single ~150ms parallel pass so noisy files never pollute your agent's context window.
 5. **📡 Live Bilingual (`EN | VI`) Radar Portal (`http://127.0.0.1:4399`):** Zero-dependency local SSE dashboard showing every agent check, probability bar, latency, cost, and **1-click Project Brain override rules**.
 
@@ -31,7 +31,7 @@ It pairs your frontier **System-2** coding agent with **[TypeSafe AI's Jev](http
 **`mcp-jev`** là lớp **Tường lửa bảo vệ (Guardrail Firewall), Kiểm toán bảo mật AST và Trạm giám sát trực tiếp** dành cho các AI Coding Agent (**Claude Code, OpenAI Codex, Cursor, Windsurf, Antigravity / Gemini**):
 - **Chặn lệnh nguy hiểm trước khi chạy (`jev_guard_action` / `jev-gate`):** Chấm xác suất an toàn trong ~150ms, tự động phát hiện và từ chối nếu Agent cố tình mô tả văn xuôi thay vì đưa câu lệnh thật.
 - **Chấm điểm `git diff` tốn 0 token của Agent (`jev_verify_diff`):** Tự đọc code thay đổi dưới local (kể cả file mới chưa `git add`), kết hợp phân tích AST (`ts-morph`, Python `ast`), linter (`oxlint`, `ruff`) và đồ thị phụ thuộc (`codegraph`) để bắt lỗi bảo mật/regression trước khi báo cáo xong việc.
-- **Audit bảo mật không làm phình ngữ cảnh (`jev_audit_code`):** Chỉ trích xuất quy tắc sửa lỗi từ bộ `SKILL.md` cục bộ khi phát hiện rủi ro vượt ngưỡng (`P >= 0.55`).
+- **Audit bảo mật không làm phình ngữ cảnh (`jev_audit_code`):** Chỉ trích quy tắc sửa lỗi khi rủi ro vượt ngưỡng (`P >= 0.55`) — ưu tiên skill bạn đã cài trên máy, nếu chưa có thì dùng bộ skill đi kèm gói (OpenAI `security-best-practices` Apache-2.0, GreenSock `gsap-performance` MIT, Matt Pocock `codebase-design` MIT; xem [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 - **Dashboard trực tiếp `http://127.0.0.1:4399` (Song ngữ `EN | VI`):** Theo dõi thời gian thực mọi câu hỏi & phán quyết của các Agent ở nhiều cửa sổ terminal và dạy lại quy tắc riêng cho từng dự án (**Project Brain**).
 
 </details>
@@ -215,7 +215,7 @@ Collects `git diff HEAD` locally (**zero agent prompt tokens wasted echoing diff
 ### 3. `jev_audit_code` — Skill-Backed Security, Architecture & GSAP Auditor
 Scores code snippets, files, or the local `git diff` across **9 OWASP/AppSec vectors** (`unvalidated_input`, `broken_authz_or_idor`, `injection_sql_cmd_path`, `xss_or_unsafe_html`, `ssrf_or_open_redirect`, `csrf_or_cookie_flaw`, `secrets_or_env_leak`, `cache_or_state_leak`, `dos_or_unbounded_resource`) + **deep-module architecture** + **60fps GSAP animation** vectors (when React/Vue/GSAP is detected).
 - **Auto-Detected Stacks:** `nextjs`, `express`, `react`, `vue`, `frontend`, `fastapi`, `django`, `flask`, `golang`, `gsap`, `general`.
-- **Lazy Skill Escalation:** Only security vectors can `BLOCK`; GSAP and architecture vectors surface non-blocking advisory guidance with targeted excerpts from your local `SKILL.md` library (`~/.gemini/config/skills`, `~/.claude/skills`, `~/.agents/skills`, or `JEV_SKILLS_DIR`).
+- **Lazy Skill Escalation:** Only security vectors can `BLOCK`; GSAP and architecture vectors surface non-blocking advisory guidance. When a vector crosses the threshold, Jev quotes the matching section of a remediation skill: your own installed copy first (`JEV_SKILLS_DIR`, `~/.gemini/config/skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.cursor/skills`), otherwise the copy **bundled with the package** — OpenAI's `security-best-practices` (Apache-2.0), GreenSock's `gsap-performance` (MIT) and Matt Pocock's `codebase-design` (MIT), vendored verbatim at pinned commits (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). Each excerpt reports `skillSource: "local" | "bundled" | "builtin"`; an unrecognised (`general`) stack gets short built-in guidance instead.
 
 ### 4. `jev_autopilot_decide` — Opt-In Human-Proxy Technical Recommender
 Evaluates multiple-choice technical trade-offs (library choice, transaction strategy, module seam) against developer engineering standards.
@@ -300,7 +300,7 @@ mcp-jev autopilot --question "Which lock strategy?" \
 | :--- | :--- | :--- |
 | `JEV_API_KEY` | `~/.mcp-jev/config.json` | TypeSafe AI API key (`jev_live_...`). Env var overrides config file. |
 | `JEV_AUTOPILOT` | `0` (disabled) | Set to `1` to allow `jev_autopilot_decide` to return `AUTOPILOT_PROCEED` on reversible technical choices. |
-| `JEV_SKILLS_DIR` | Auto-detected | Custom path to local `SKILL.md` library (auto-scans `~/.gemini/config/skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.cursor/skills`). |
+| `JEV_SKILLS_DIR` | Auto-detected | Custom path to your own `SKILL.md` library (auto-scans `~/.gemini/config/skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.cursor/skills`). Any skill missing there falls back to the copy bundled in `skills/vendor/`. |
 | `JEV_FAIL_MODE` | `ask` | `jev-gate` hook fallback if Jev API is unreachable: `ask` (human prompt), `open` (allow), or `closed` (exit code `2` block). |
 | `JEV_EVENTS_FILE` | `~/.mcp-jev/events.jsonl` | Custom path for the cross-process event ledger (auto-rotates to `events.1.jsonl` at `5 MiB`). |
 | `JEV_EVENTS_MAX_BYTES` | `5242880` (5 MiB) | Byte threshold before atomic lockfile-guarded rotation of `events.jsonl`. |
@@ -346,8 +346,10 @@ mcp-jev/
 │       ├── hook-runner.ts         # Zero-Trust PreToolUse hook runner (Claude Code / Cursor)
 │       └── setup.ts               # Interactive config writer & companion skill installer
 ├── skills/
-│   └── jev-system-one/SKILL.md    # Companion agent workflow instructions
-└── tests/                         # 11 test suites (calibration, concurrency, security & AST engines)
+│   ├── jev-system-one/SKILL.md    # Companion agent workflow instructions
+│   └── vendor/                    # Bundled third-party remediation skills (pinned, verbatim, own licenses)
+├── scripts/vendor-skills.mjs      # Re-vendors skills/vendor from upstream at pinned commits
+└── tests/                         # Test suites (calibration, concurrency, security, AST engines, bundled skills)
 ```
 
 ---
@@ -360,4 +362,4 @@ mcp-jev/
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE). Bundled third-party skills keep their own licenses (Apache-2.0 and MIT); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -1,14 +1,14 @@
 {
   "name": "jev-codeguard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Command firewall, AST security auditor, context pruner & zero-token git diff verifier for AI coding agents (Claude Code, Codex, Cursor, Gemini) — powered by TypeSafe AI Jev",
   "type": "module",
   "main": "./dist/src/cli/index.js",
   "types": "./dist/src/core/types.d.ts",
   "bin": {
-    "jev-codeguard": "./dist/src/cli/index.js",
-    "mcp-jev": "./dist/src/cli/index.js",
-    "jev-gate": "./dist/src/cli/index.js"
+    "jev-codeguard": "dist/src/cli/index.js",
+    "mcp-jev": "dist/src/cli/index.js",
+    "jev-gate": "dist/src/cli/index.js"
   },
   "repository": {
     "type": "git",
@@ -22,7 +22,8 @@
     "dist/src",
     "skills",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsc",

@@ -1,14 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   detectCodeStack,
   buildSkillAuditQuestions,
   extractSkillRemediation,
   auditCodeWithSkills,
-  resolveSkillsDir
+  resolveSkillsDir,
+  BUNDLED_SKILLS_DIR
 } from "../src/core/skill-auditor.js";
 import { JevClient } from "../src/core/jev-client.js";
-import type { JevResponse } from "../src/core/types.js";
+import type { CodeStack, JevResponse } from "../src/core/types.js";
 
 test("detectCodeStack accurately identifies Next.js, FastAPI, Golang, Express, and GSAP stacks", () => {
   assert.equal(
@@ -168,4 +173,78 @@ test("a GSAP or architecture finding alone never blocks (misspelled filter key r
     ["gsap_layout_thrashing_or_cleanup", "shallow_module_or_arch_flaw"]
   );
   assert.match(res.summary, /^ALLOW with non-blocking findings/);
+});
+
+function emptyTempDir(label: string): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), `jev-skills-${label}-`));
+}
+
+test("remediation falls back to the skills bundled in the package when the user has none installed", () => {
+  const noUserSkills = emptyTempDir("none");
+  try {
+    const [ssrf] = extractSkillRemediation(noUserSkills, "nextjs", [{ vector: "ssrf_or_open_redirect", probability: 0.9 }]);
+    assert.equal(ssrf.skillSource, "bundled");
+    assert.match(ssrf.excerpt, /\[Extracted from javascript-typescript-nextjs-web-server-security\.md, bundled with jev-codeguard\]/);
+  } finally {
+    fs.rmSync(noUserSkills, { recursive: true, force: true });
+  }
+});
+
+test("a user's installed skill overrides the bundled copy, and built-in guidance is the last resort", () => {
+  const userSkills = emptyTempDir("user");
+  const noBundle = emptyTempDir("nobundle");
+  try {
+    const rel = path.join(userSkills, "security-best-practices", "references", "javascript-typescript-nextjs-web-server-security.md");
+    fs.mkdirSync(path.dirname(rel), { recursive: true });
+    fs.writeFileSync(rel, "# Notes\n\n## SSRF\nUSER_OWN_SSRF_RULE: allowlist outbound hosts.\n");
+
+    const [local] = extractSkillRemediation(userSkills, "nextjs", [{ vector: "ssrf_or_open_redirect", probability: 0.9 }]);
+    assert.equal(local.skillSource, "local");
+    assert.match(local.excerpt, /USER_OWN_SSRF_RULE/);
+
+    const [builtin] = extractSkillRemediation(noBundle, "nextjs", [{ vector: "ssrf_or_open_redirect", probability: 0.9 }], noBundle);
+    assert.equal(builtin.skillSource, "builtin");
+    assert.doesNotMatch(builtin.excerpt, /Extracted from/);
+    assert.ok(builtin.excerpt.length > 40);
+  } finally {
+    fs.rmSync(userSkills, { recursive: true, force: true });
+    fs.rmSync(noBundle, { recursive: true, force: true });
+  }
+});
+
+test("every framework stack, GSAP and architecture vector resolves to a real section in the bundled skills", () => {
+  const noUserSkills = emptyTempDir("stacks");
+  try {
+    const stacks: CodeStack[] = ["nextjs", "express", "react", "vue", "frontend", "fastapi", "django", "flask", "golang", "gsap"];
+    for (const stack of stacks) {
+      const [hit] = extractSkillRemediation(noUserSkills, stack, [{ vector: "unvalidated_input", probability: 0.9 }]);
+      assert.equal(hit.skillSource, "bundled", `stack ${stack} -> ${hit.skillFile}`);
+    }
+    // An unrecognised stack has no language-specific rules to quote, so it honestly reports built-in guidance.
+    const [general] = extractSkillRemediation(noUserSkills, "general", [{ vector: "unvalidated_input", probability: 0.9 }]);
+    assert.equal(general.skillSource, "builtin");
+    const [gsap, arch] = extractSkillRemediation(noUserSkills, "react", [
+      { vector: "gsap_layout_thrashing_or_cleanup", probability: 0.9 },
+      { vector: "shallow_module_or_arch_flaw", probability: 0.9 }
+    ]);
+    assert.equal(gsap.skillSource, "bundled");
+    assert.equal(arch.skillSource, "bundled");
+  } finally {
+    fs.rmSync(noUserSkills, { recursive: true, force: true });
+  }
+});
+
+test("bundled third-party skills match the vendored manifest and each ships its upstream license", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(BUNDLED_SKILLS_DIR, "manifest.json"), "utf8")) as {
+    sources: Array<{ skill: string; commit: string; license: string; files: Array<{ path: string; sha256: string }> }>;
+  };
+  assert.deepEqual(manifest.sources.map((s) => s.skill).sort(), ["codebase-design", "gsap-performance", "security-best-practices"]);
+  for (const src of manifest.sources) {
+    assert.match(src.commit, /^[0-9a-f]{40}$/);
+    assert.ok(src.files.some((f) => /^LICENSE(\.txt)?$/.test(f.path)), `${src.skill} must ship its license`);
+    for (const f of src.files) {
+      const buf = fs.readFileSync(path.join(BUNDLED_SKILLS_DIR, src.skill, f.path));
+      assert.equal(createHash("sha256").update(buf).digest("hex"), f.sha256, `${src.skill}/${f.path} was modified`);
+    }
+  }
 });
