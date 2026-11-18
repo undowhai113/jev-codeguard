@@ -1,0 +1,12 @@
+{
+  "$comment": "Production npm audit advisories accepted temporarily. Every entry needs a reason it is not exploitable here and an expiry date; scripts/audit-gate.mjs fails CI once it expires so the decision is revisited.",
+  "allow": [
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "via": "ts-morph -> @ts-morph/common -> tinyglobby -> picomatch",
+      "reason": "ReDoS needs an attacker-controlled extglob pattern. jev-codeguard never globs with ts-morph: the Project is created with skipAddingFilesFromTsConfig and files are added only via createSourceFile(path, content) (src/core/hybrid-ast-engine.ts). No patched picomatch exists yet (all versions <= 4.0.7 affected), and the ts-morph@26 downgrade suggested by npm still pulls picomatch@2 through fast-glob.",
+      "expires": "2026-12-18"
+    }
+  ]
+}

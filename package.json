@@ -32,7 +32,8 @@
     "start": "node dist/src/cli/index.js serve",
     "dashboard": "node dist/src/cli/index.js dashboard",
     "gate": "node dist/src/cli/index.js gate",
-    "setup": "node dist/src/cli/index.js setup"
+    "setup": "node dist/src/cli/index.js setup",
+    "audit:gate": "node scripts/audit-gate.mjs"
   },
   "keywords": [
     "mcp",

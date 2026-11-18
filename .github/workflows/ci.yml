@@ -52,8 +52,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Production dependency security audit
-        run: npm audit --omit=dev --audit-level=moderate
+      - name: Production dependency security audit (expiring allowlist in .github/audit-allowlist.json)
+        run: npm run audit:gate
 
       - name: Verify clean npm package tarball
         run: |
