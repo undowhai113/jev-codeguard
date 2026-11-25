@@ -41,6 +41,29 @@ test("assessCommandShape flags prose descriptions that agents sent as commands",
   assert.deepEqual(assessCommandShape("   ").signals, ["empty"]);
 });
 
+test("assessCommandShape flags Vietnamese intent prose while accepting quoted Vietnamese paths", () => {
+  const vnProse = [
+    "Em chỉ dọn file rác thôi ạ",
+    "em chỉ dọn file rác thôi ạ",
+    "Chỉ xóa các file tạm không cần thiết trong dự án này thôi",
+    "Tôi sẽ chạy lệnh cập nhật cấu hình bảo mật cho hệ thống"
+  ];
+  for (const text of vnProse) {
+    const shape = assessCommandShape(text);
+    assert.equal(shape.looksLikeProse, true, `expected Vietnamese prose: ${text}`);
+  }
+
+  const vnCommands = [
+    'git commit -m "Em chỉ dọn file rác thôi ạ"',
+    'cat "tài liệu bảo mật.md"',
+    "ls -la"
+  ];
+  for (const cmd of vnCommands) {
+    const shape = assessCommandShape(cmd);
+    assert.equal(shape.looksLikeProse, false, `expected literal command: ${cmd}`);
+  }
+});
+
 test("assessCommandShape accepts literal commands, ignoring quoted strings, here-strings and comments", () => {
   for (const cmd of REAL_COMMANDS) {
     const shape = assessCommandShape(cmd);

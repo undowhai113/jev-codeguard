@@ -5,20 +5,41 @@ import { runPreToolHook } from "./hook-runner.js";
 import { runSetup } from "./setup.js";
 import { startDashboardServer } from "../dashboard/server.js";
 
-function readStdin(): Promise<string> {
+const MAX_STDIN_BYTES = 2 * 1024 * 1024;
+
+function readStdin(maxBytes = MAX_STDIN_BYTES): Promise<string> {
   return new Promise((resolve) => {
     if (process.stdin.isTTY) {
       resolve("");
       return;
     }
-    let data = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    };
+    process.stdin.on("data", (chunk: Buffer | string) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+      if (total < maxBytes) {
+        const remaining = maxBytes - total;
+        chunks.push(buf.length <= remaining ? buf : buf.subarray(0, remaining));
+        total += Math.min(buf.length, remaining);
+      }
     });
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", () => resolve(data));
+    process.stdin.on("end", finish);
+    process.stdin.on("error", finish);
   });
+}
+
+function firstPositionalArg(args: string[]): string | undefined {
+  const candidate = args[1];
+  if (!candidate || candidate.startsWith("-")) {
+    return undefined;
+  }
+  return candidate;
 }
 
 function getArgValue(args: string[], flag: string): string | undefined {
@@ -55,8 +76,12 @@ async function main(): Promise<void> {
   if (subcommand === "dashboard" || subcommand === "portal" || subcommand === "radar") {
     const portArg = getArgValue(args, "--port");
     const port = portArg ? Number(portArg) : 4399;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      console.error("[jev-codeguard radar]: --port must be an integer between 1 and 65535");
+      process.exit(1);
+    }
     const { url } = await startDashboardServer({ port });
-    console.log(`[mcp-jev radar]: Live Agent Q&A Portal listening at ${url}`);
+    console.log(`[jev-codeguard radar]: Live Agent Q&A Portal listening at ${url}`);
     return;
   }
 
@@ -89,7 +114,7 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "autopilot" || subcommand === "decide") {
-    const question = getArgValue(args, "--question") ?? args[1] ?? "";
+    const question = getArgValue(args, "--question") ?? firstPositionalArg(args) ?? "";
     const context = getArgValue(args, "--context") ?? "";
     const optFlags = getAllArgValues(args, "--opt");
     const optionsRaw = getArgValue(args, "--options");
@@ -130,7 +155,7 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "audit") {
-    const filePath = getArgValue(args, "--file") ?? args[1];
+    const filePath = getArgValue(args, "--file") ?? firstPositionalArg(args);
     const code =
       filePath && fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : undefined;
     const dispatcher = new McpJevDispatcher();
@@ -144,7 +169,10 @@ async function main(): Promise<void> {
   }
 
   if (subcommand === "verify-diff") {
-    const spec = getArgValue(args, "--spec") ?? args[1] ?? "Verify git diff quality and safety";
+    const spec =
+      getArgValue(args, "--spec") ??
+      firstPositionalArg(args) ??
+      "Verify git diff quality and safety";
     const dispatcher = new McpJevDispatcher();
     const res = await dispatcher.verifyDiff({ spec, agent: explicitAgent });
     process.stdout.write(`${JSON.stringify(res, null, 2)}\n`);
@@ -153,8 +181,9 @@ async function main(): Promise<void> {
 
   if (subcommand === "setup" || subcommand === "init") {
     const apiKey = getArgValue(args, "--api-key");
-    const report = runSetup({ apiKey });
-    console.log("=== MCP-Jev Setup Complete ===");
+    const portable = args.includes("--portable") ? true : undefined;
+    const report = runSetup({ apiKey, portable });
+    console.log("=== Jev CodeGuard Setup Complete ===");
     if (report.configSavedPath) {
       console.log(`[+] Saved API key config to: ${report.configSavedPath}`);
     }
@@ -170,16 +199,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`mcp-jev v1.1.0 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
+  console.log(`jev-codeguard v1.1.1 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
 
 Usage:
-  mcp-jev serve                                                        Start MCP stdio server + auto-start Radar Portal (default)
-  mcp-jev dashboard [--port 4399]                                      Launch standalone Live Radar Portal (http://localhost:4399)
-  mcp-jev setup [--api-key <key>]                                      Save API key (0600), install SKILL.md, and print IDE configs
-  mcp-jev autopilot --question "<q>" --opt A="desc" --opt B="desc"     Run Human-Proxy Autopilot (auto-proceeds only with JEV_AUTOPILOT=1)
-  mcp-jev gate [--command "<cmd>" | --file <path>]                     Run Zero-Trust PreToolUse Hook Firewall (stdin or flags)
-  mcp-jev audit [--file <path>]                                        Run Skill-Backed Security & Quality Audit on file or git diff
-  mcp-jev verify-diff --spec "<spec>"                                  Run Zero-Token Local Git Diff Verification Gate
+  jev-codeguard serve                                                        Start MCP stdio server + auto-start Radar Portal (default)
+  jev-codeguard dashboard [--port 4399]                                      Launch standalone Live Radar Portal (http://localhost:4399)
+  jev-codeguard setup [--api-key <key>] [--portable]                         Save API key (0600), install SKILL.md, and print IDE configs
+  jev-codeguard autopilot --question "<q>" --opt A="desc" --opt B="desc"     Run Human-Proxy Autopilot (auto-proceeds only with JEV_AUTOPILOT=1)
+  jev-codeguard gate [--command "<cmd>" | --file <path>]                     Run Zero-Trust PreToolUse Hook Firewall (stdin or flags)
+  jev-codeguard audit [--file <path>]                                        Run Skill-Backed Security & Quality Audit on file or git diff
+  jev-codeguard verify-diff --spec "<spec>"                                  Run Zero-Token Local Git Diff Verification Gate
 `);
 }
 

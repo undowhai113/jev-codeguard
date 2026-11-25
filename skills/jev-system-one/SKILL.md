@@ -41,13 +41,13 @@ Instead of wasting your context window or relying on uncalibrated self-assessmen
 
 ### 3. After Writing Backend, Frontend, or Animation Code $\rightarrow$ `jev_audit_code`
 - Call **`jev_audit_code`** (you can omit `code` to automatically audit the local `git diff` at zero token cost!).
-- **Lazy Skill Escalation:**
-  - Jev scores 10+ vectors compiled from your installed skills (`security-best-practices`, `gsap-performance`, `codebase-design`).
+- **Lazy Skill Escalation (with Bundled Skills):**
+  - Jev scores 10+ vectors compiled from your installed skills or the vendored Apache-2.0/MIT skill library bundled inside `jev-codeguard` (`security-best-practices`, `gsap-performance`, `codebase-design`).
   - If all vectors pass ($P < 0.55$), you do **not** need to load 1,000-line skill reference files into your context.
-  - If any vector exceeds $P \ge 0.55$, `jev_audit_code` automatically extracts the exact remediation rules from the local skill reference file (`nextjs`, `express`, `fastapi`, `django`, `golang`, `gsap`, etc.) so you can fix the issue immediately.
+  - If any vector exceeds $P \ge 0.55$, `jev_audit_code` automatically extracts the exact remediation rules from your local skill (or the bundled fallback inside `jev-codeguard`) for `nextjs`, `express`, `fastapi`, `django`, `golang`, `gsap`, etc. so you can fix the issue immediately.
 
 ### 4. Before Claiming Completion or Committing $\rightarrow$ `jev_verify_diff`
-- Call **`jev_verify_diff`** with the user's original request as `spec` and optional `test_output` (leave `git_diff` empty so `mcp-jev` collects `git diff HEAD` locally with zero token overhead). Pass `working_directory` so the right repository is read.
+- Call **`jev_verify_diff`** with the user's original request as `spec` and optional `test_output` (leave `git_diff` empty so `jev-codeguard` collects `git diff HEAD` locally with zero token overhead). Pass `working_directory` so the right repository is read.
 - Respect the returned verdict:
   - `ALLOW`: clean.
   - `ASK_USER` (warning): spec alignment is uncertain or tests look missing. Tell the user which parts are uncertain when you report completion. Do **not** rewrite the `spec` to match the diff and re-run until it passes.

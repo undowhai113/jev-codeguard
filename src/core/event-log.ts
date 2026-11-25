@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
-export type AgentIdentity = "Codex" | "Gemini" | "CLI";
+export type AgentIdentity = "Codex" | "Gemini" | "Claude" | "Cursor" | "CLI";
 
 export type EventVerdict =
   | "AUTOPILOT_PROCEED"
@@ -161,6 +161,12 @@ export function detectAgentIdentity(explicitAgent?: string): AgentIdentity {
   if (raw.includes("codex") || raw.includes("openai")) {
     return "Codex";
   }
+  if (raw.includes("claude") || raw.includes("anthropic")) {
+    return "Claude";
+  }
+  if (raw.includes("cursor")) {
+    return "Cursor";
+  }
   if (raw.includes("gemini") || raw.includes("antigravity") || raw.includes("google")) {
     return "Gemini";
   }
@@ -177,6 +183,16 @@ export function detectAgentIdentity(explicitAgent?: string): AgentIdentity {
     process.env.OPENAI_CODEX
   ) {
     return "Codex";
+  }
+
+  // Auto-detect Claude Code environment variables
+  if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_ENTRYPOINT) {
+    return "Claude";
+  }
+
+  // Auto-detect Cursor environment variables
+  if (process.env.CURSOR_TRACE_ID || process.env.CURSOR_AGENT) {
+    return "Cursor";
   }
 
   // Auto-detect Antigravity / Gemini environment variables

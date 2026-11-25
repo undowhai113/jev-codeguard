@@ -737,6 +737,27 @@ export class McpJevDispatcher {
       };
     });
 
+    const cwd = resolveTargetWorkspace(undefined, [input.instructions]);
+    recordSessionEvent({
+      agent: input.agent,
+      workingDirectory: cwd,
+      workspace: path.basename(cwd) || "workspace",
+      tool: "jev_classify_batch",
+      questionOrTitle: input.instructions.slice(0, 300),
+      optionsOrInput: {
+        items_count: String(results.length),
+        criteria_keys: Object.keys(input.criteria).join(", ")
+      },
+      verdict: "INFO",
+      selectedOption: `Classified ${results.length} item(s)`,
+      selectedProbability: 1,
+      probabilities: {},
+      directive: `Batch classified ${results.length} item(s) across [${Object.keys(input.criteria).join(", ")}]`,
+      latencyMs,
+      costUsd: response.usage?.cost ?? 0,
+      cached
+    });
+
     return {
       count: results.length,
       latencyMs,
@@ -949,7 +970,7 @@ export function createMcpJevServer(client?: JevClient): McpServer {
   const dispatcher = new McpJevDispatcher(client);
   const server = new McpServer({
     name: "mcp-jev",
-    version: "1.1.0"
+    version: "1.1.1"
   });
 
   server.tool(

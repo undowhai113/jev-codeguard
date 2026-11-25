@@ -61,7 +61,14 @@ export class JevClient {
       "https://api.typesafe.ai/v1/systemone"
     ).replace(/\/+$/, "");
     this.defaultModel = options.model ?? process.env.JEV_MODEL ?? "jev-latest";
-    this.timeoutMs = options.timeoutMs ?? Number(process.env.JEV_TIMEOUT_MS ?? 5000);
+    const rawEnvTimeout = process.env.JEV_TIMEOUT_MS?.trim();
+    const parsedEnvTimeout = rawEnvTimeout ? Number(rawEnvTimeout) : 5000;
+    const safeDefaultTimeout =
+      Number.isFinite(parsedEnvTimeout) && parsedEnvTimeout >= 200 ? parsedEnvTimeout : 5000;
+    this.timeoutMs =
+      options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs >= 10
+        ? options.timeoutMs
+        : safeDefaultTimeout;
     this.retryDelayMs = options.retryDelayMs ?? 120;
     this.configPath =
       options.configPath ?? path.join(os.homedir(), ".mcp-jev", "config.json");
@@ -105,7 +112,7 @@ export class JevClient {
       }
     }
     throw new JevApiError(
-      "Missing Jev API key. Set JEV_API_KEY (or TYPESAFE_API_KEY) environment variable, or run `npx mcp-jev setup --api-key <key>`.",
+      "Missing Jev API key. Set JEV_API_KEY (or TYPESAFE_API_KEY) environment variable, or run `npx jev-codeguard setup --api-key <key>`.",
       "MISSING_API_KEY"
     );
   }

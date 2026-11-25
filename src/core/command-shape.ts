@@ -16,14 +16,19 @@ export interface CommandShapeAssessment {
   wordCount: number;
 }
 
-/** English function words that are common in prose and rare as bare shell arguments. */
+/** English & Vietnamese function words that are common in prose and rare as bare shell arguments. */
 const PROSE_STOPWORDS = new Set([
   "the", "a", "an", "and", "or", "but", "only", "into", "onto", "with", "without",
   "before", "after", "using", "via", "exactly", "that", "which", "this", "these",
   "those", "will", "would", "should", "must", "could", "is", "are", "was", "were",
   "be", "been", "no", "any", "every", "each", "of", "to", "from", "by", "as", "so",
   "because", "while", "also", "just", "then", "than", "it", "its", "we", "our",
-  "you", "your", "their", "them", "against", "through", "per", "unless", "until"
+  "you", "your", "their", "them", "against", "through", "per", "unless", "until",
+  // Vietnamese prose stopwords (prevents bypassing the command guard with Vietnamese intent prose)
+  "chỉ", "thôi", "cho", "của", "không", "được", "với", "khi", "nhưng", "phải",
+  "thêm", "sửa", "xóa", "dọn", "chạy", "lệnh", "mình", "tôi", "em", "anh",
+  "để", "này", "đó", "các", "những", "rồi", "nhé", "ạ", "thì", "là", "rác",
+  "tạm", "toàn", "lại", "luôn", "đang", "sẽ", "vào", "ra", "lên", "xuống"
 ]);
 
 const MAX_ANALYZED_CHARS = 20000;
@@ -92,8 +97,8 @@ function stripLiterals(command: string): string {
   return out;
 }
 
-const WORD_RE = /^[A-Za-z][A-Za-z'’-]*[,.:;!?]?$/;
-const CAPITALIZED_PROSE_LEAD_RE = /^[A-Z][a-z]+(?:-[a-z]+)*[,:.]?$/;
+const WORD_RE = /^\p{L}[\p{L}'’-]*[,.:;!?]?$/u;
+const CAPITALIZED_PROSE_LEAD_RE = /^\p{Lu}\p{Ll}+(?:-\p{Ll}+)*[,:.]?$/u;
 
 function bareWord(token: string): string {
   return token.replace(/[,.:;!?]+$/, "").toLowerCase();
@@ -137,7 +142,7 @@ export function assessCommandShape(rawCommand: string): CommandShapeAssessment {
   if (stopwordCount >= STOPWORD_MIN_COUNT && stopwordCount / Math.max(1, wordCount) >= STOPWORD_MIN_RATIO) {
     signals.push(`stopwords:${stopwordCount}/${wordCount}`);
   }
-  if (/[a-z]{2,}[.!?]\s+[A-Z][a-z]+\s/.test(stripped)) {
+  if (/\p{Ll}{2,}[.!?]\s+\p{Lu}\p{Ll}+\s/u.test(stripped)) {
     signals.push("sentence-break");
   }
   if (/,\s+(?:and\s+)?(?:then|but|so)\s/i.test(stripped) || /\b(?:and then|followed by)\b/i.test(stripped)) {

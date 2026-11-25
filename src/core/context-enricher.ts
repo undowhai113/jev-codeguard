@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -199,6 +200,10 @@ export function isWithinWorkspaceBoundary(workspaceRoot: string, targetPath: str
   } catch {
     return false;
   }
+}
+
+export function isSafeReadableWorkspaceFile(workspaceRoot: string, targetPath: string): boolean {
+  return !isSensitiveFilePath(targetPath) && isWithinWorkspaceBoundary(workspaceRoot, targetPath);
 }
 
 let cachedPythonBin: string | null = null;
@@ -764,7 +769,7 @@ export function extractPostEditHunkScopes(
     if (!relFile || !/\.(ts|tsx|js|jsx|mjs|py|go|css)$/i.test(relFile)) continue;
 
     const fullPath = path.join(resolvedCwd, relFile);
-    if (!fs.existsSync(fullPath)) continue;
+    if (!isSafeReadableWorkspaceFile(resolvedCwd, fullPath) || !fs.existsSync(fullPath)) continue;
 
     try {
       const fileLines = fs.readFileSync(fullPath, "utf8").split(/\r?\n/);
@@ -878,7 +883,13 @@ export function extractCrossFileContracts(
   for (const relFile of changedFiles.slice(0, 8)) {
     if (Object.keys(contracts).length >= maxContracts || totalChars >= maxTotalChars) break;
     const fullFrom = path.isAbsolute(relFile) ? relFile : path.join(resolvedCwd, relFile);
-    if (!fs.existsSync(fullFrom) || !fs.statSync(fullFrom).isFile()) continue;
+    if (
+      !isSafeReadableWorkspaceFile(resolvedCwd, fullFrom) ||
+      !fs.existsSync(fullFrom) ||
+      !fs.statSync(fullFrom).isFile()
+    ) {
+      continue;
+    }
 
     try {
       const source = fs.readFileSync(fullFrom, "utf8").slice(0, 8000);
@@ -893,7 +904,13 @@ export function extractCrossFileContracts(
       for (const spec of importSpecs) {
         if (Object.keys(contracts).length >= maxContracts || totalChars >= maxTotalChars) break;
         const resolvedTarget = resolveRelativeImportPath(fullFrom, spec, resolvedCwd);
-        if (!resolvedTarget || visitedTargets.has(resolvedTarget)) continue;
+        if (
+          !resolvedTarget ||
+          visitedTargets.has(resolvedTarget) ||
+          !isSafeReadableWorkspaceFile(resolvedCwd, resolvedTarget)
+        ) {
+          continue;
+        }
         visitedTargets.add(resolvedTarget);
 
         const targetLines = fs.readFileSync(resolvedTarget, "utf8").split(/\r?\n/);
@@ -922,14 +939,34 @@ export function extractCrossFileContracts(
   if (fs.existsSync(path.join(resolvedCwd, ".codegraph")) && changedFiles.length > 0) {
     try {
       const queryTerm = path.basename(changedFiles[0], path.extname(changedFiles[0]));
-      const cgOut = execFileSync("codegraph", ["query", queryTerm], {
-        cwd: resolvedCwd,
-        encoding: "utf8",
-        timeout: 1200,
-        stdio: ["ignore", "pipe", "ignore"]
-      }).trim();
-      if (cgOut) {
-        contracts["[codegraph_symbol_relations]"] = cgOut.slice(0, 900);
+      if (/^[A-Za-z0-9_.-]+$/.test(queryTerm) && !queryTerm.startsWith("-")) {
+        const winNpmCodegraphJs =
+          process.platform === "win32" && process.env.APPDATA
+            ? path.join(
+                process.env.APPDATA,
+                "npm",
+                "node_modules",
+                "@colbymchenry",
+                "codegraph",
+                "dist",
+                "bin",
+                "codegraph.js"
+              )
+            : undefined;
+        const useNodeJsRunner = Boolean(winNpmCodegraphJs && fs.existsSync(winNpmCodegraphJs));
+        const cgOut = execFileSync(
+          useNodeJsRunner ? process.execPath : "codegraph",
+          useNodeJsRunner ? [winNpmCodegraphJs!, "query", queryTerm] : ["query", queryTerm],
+          {
+            cwd: resolvedCwd,
+            encoding: "utf8",
+            timeout: 1200,
+            stdio: ["ignore", "pipe", "ignore"]
+          }
+        ).trim();
+        if (cgOut) {
+          contracts["[codegraph_symbol_relations]"] = cgOut.slice(0, 900);
+        }
       }
     } catch {
       // non-fatal if codegraph binary is not in PATH or times out
@@ -1082,6 +1119,9 @@ export function extractFileHeaderContext(
     const fullPath = path.isAbsolute(relOrAbs)
       ? relOrAbs
       : path.join(resolvedCwd, relOrAbs);
+    if (!isSafeReadableWorkspaceFile(resolvedCwd, fullPath)) {
+      continue;
+    }
     try {
       if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) continue;
       const lines = fs
@@ -1394,12 +1434,20 @@ export function extractDomainAndRuntimeFingerprint(cwd: string): string {
  * so Jev retains permanent architectural memory of each project across restarts.
  */
 export function getProjectBrainFilePath(workspaceName: string): string {
-  const safeName = (workspaceName || "workspace").replace(/[^A-Za-z0-9_.-]/g, "_");
+  const safeName =
+    (workspaceName || "workspace")
+      .replace(/[^A-Za-z0-9_.-]/g, "_")
+      .replace(/^\.+/, "_")
+      .slice(0, 120) || "workspace";
   const brainDir = path.join(os.homedir(), ".mcp-jev", "projects");
   if (!fs.existsSync(brainDir)) {
     fs.mkdirSync(brainDir, { recursive: true });
   }
-  return path.join(brainDir, `${safeName}.json`);
+  const candidate = path.join(brainDir, `${safeName}.json`);
+  if (!isWithinWorkspaceBoundary(brainDir, candidate)) {
+    return path.join(brainDir, "workspace.json");
+  }
+  return candidate;
 }
 
 export function readLearnedHumanOverrides(workspaceName: string): LearnedHumanOverride[] {
@@ -1477,7 +1525,7 @@ export function recordProjectFeedbackRule(input: {
     : [];
 
   const newEntry: LearnedHumanOverride = {
-    id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    id: `rule_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
     createdAt: new Date().toISOString(),
     tool: input.tool || "all_tools",
     feedbackType: input.feedbackType,
@@ -1567,7 +1615,13 @@ export function runFastSyntaxProbe(cwd: string, changedFiles: string[]): PreFlig
 
   for (const rel of changedFiles.slice(0, 6)) {
     const fullPath = path.isAbsolute(rel) ? rel : path.join(resolvedCwd, rel);
-    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) continue;
+    if (
+      !isSafeReadableWorkspaceFile(resolvedCwd, fullPath) ||
+      !fs.existsSync(fullPath) ||
+      !fs.statSync(fullPath).isFile()
+    ) {
+      continue;
+    }
 
     if (rel.endsWith(".json")) {
       checkedFiles.push(rel);

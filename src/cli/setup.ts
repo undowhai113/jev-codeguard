@@ -19,22 +19,42 @@ const SetupOptionsSchema = z.object({
     .min(1)
     .max(512)
     .refine((p) => !p.includes("\u0000"), "Invalid path")
-    .optional()
+    .optional(),
+  portable: z.boolean().optional(),
+  skipAutoRegister: z.boolean().optional(),
+  antigravityMcpConfigPath: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .refine((p) => !p.includes("\u0000"), "Invalid path")
+    .optional(),
+  projectRootOverride: z.string().trim().min(1).max(512).optional()
 });
 
 export interface SetupOptions {
   apiKey?: string;
   installSkill?: boolean;
   skillsTargetDir?: string;
+  portable?: boolean;
+  skipAutoRegister?: boolean;
+  antigravityMcpConfigPath?: string;
+  projectRootOverride?: string;
 }
 
 export interface SetupReport {
   configSavedPath?: string;
   skillInstalledPath?: string;
   mcpEntrypoint: string;
+  portableMode: boolean;
   mcpConfigSnippet: string;
   codexTomlSnippet: string;
   claudeHookSnippet: string;
+}
+
+export function isPackagedInstallRoot(rootDir: string): boolean {
+  const normalized = rootDir.replace(/\\/g, "/");
+  return /\/_npx\/|\/node_modules\//i.test(normalized);
 }
 
 export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
@@ -62,10 +82,17 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
   }
 
   const currentFile = fileURLToPath(import.meta.url);
-  const projectRoot = path.resolve(path.dirname(currentFile), "..", "..", "..");
+  const projectRoot =
+    options.projectRootOverride ?? path.resolve(path.dirname(currentFile), "..", "..", "..");
+  const portableMode = options.portable ?? isPackagedInstallRoot(projectRoot);
   const mcpEntrypoint = path
     .join(projectRoot, "dist", "src", "cli", "index.js")
     .replace(/\\/g, "/");
+  const serverCommand = portableMode ? "npx" : "node";
+  const serverArgs = portableMode ? ["-y", "jev-codeguard", "serve"] : [mcpEntrypoint, "serve"];
+  const hookCommand = portableMode
+    ? "npx -y jev-codeguard gate"
+    : `node "${mcpEntrypoint}" gate`;
 
   let skillInstalledPath: string | undefined;
   if (options.installSkill !== false) {
@@ -80,21 +107,29 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
     }
   }
 
-  // Auto-register in Antigravity mcp_config.json if present
-  const antigravityMcpPath = path.join(homeDir, ".gemini", "antigravity", "mcp_config.json");
-  if (fs.existsSync(antigravityMcpPath)) {
+  // Auto-register in Antigravity mcp_config.json if present (preserving existing custom env keys)
+  const antigravityMcpPath =
+    options.antigravityMcpConfigPath ??
+    path.join(homeDir, ".gemini", "antigravity", "mcp_config.json");
+  if (!options.skipAutoRegister && fs.existsSync(antigravityMcpPath)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(antigravityMcpPath, "utf8")) as {
-        mcpServers?: Record<string, unknown>;
+        mcpServers?: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>;
       };
       parsed.mcpServers = parsed.mcpServers ?? {};
+      const existingEntry = parsed.mcpServers["mcp-jev"];
+      const existingEnv =
+        existingEntry && typeof existingEntry.env === "object" && existingEntry.env !== null
+          ? existingEntry.env
+          : {};
       parsed.mcpServers["mcp-jev"] = {
-        command: "node",
-        args: [mcpEntrypoint, "serve"],
+        command: serverCommand,
+        args: serverArgs,
         env: {
-          JEV_SKILLS_DIR: path
-            .join(homeDir, ".gemini", "config", "skills")
-            .replace(/\\/g, "/")
+          ...existingEnv,
+          JEV_SKILLS_DIR:
+            existingEnv.JEV_SKILLS_DIR ??
+            path.join(homeDir, ".gemini", "config", "skills").replace(/\\/g, "/")
         }
       };
       fs.writeFileSync(antigravityMcpPath, JSON.stringify(parsed, null, 2), "utf8");
@@ -107,8 +142,8 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
     {
       mcpServers: {
         "mcp-jev": {
-          command: "node",
-          args: [mcpEntrypoint, "serve"],
+          command: serverCommand,
+          args: serverArgs,
           env: {
             JEV_API_KEY: options.apiKey ? "<SAVED_IN_~/.mcp-jev/config.json>" : "jev_live_your_key_here",
             JEV_SKILLS_DIR: path
@@ -124,8 +159,8 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
 
   const codexTomlSnippet = [
     "[mcp_servers.mcp-jev]",
-    'command = "node"',
-    `args = ["${mcpEntrypoint}", "serve"]`
+    `command = ${JSON.stringify(serverCommand)}`,
+    `args = ${JSON.stringify(serverArgs)}`
   ].join("\n");
 
   const claudeHookSnippet = JSON.stringify(
@@ -137,7 +172,7 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
             hooks: [
               {
                 type: "command",
-                command: `node "${mcpEntrypoint}" gate`
+                command: hookCommand
               }
             ]
           }
@@ -152,6 +187,7 @@ export function runSetup(rawOptions: SetupOptions = {}): SetupReport {
     configSavedPath,
     skillInstalledPath,
     mcpEntrypoint,
+    portableMode,
     mcpConfigSnippet,
     codexTomlSnippet,
     claudeHookSnippet

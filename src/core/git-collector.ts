@@ -91,6 +91,28 @@ export function budgetMultiFileDiff(
   return `${header}${budgetedChunks.join("\n\n")}`;
 }
 
+/**
+ * Strips any `diff --git` sections referencing secret/credential files (e.g. `.env`, `*.key`, `id_rsa`)
+ * so even accidentally tracked sensitive files are never forwarded to an external API.
+ */
+export function stripSensitiveDiffSections(rawDiff: string): string {
+  if (!rawDiff || !rawDiff.trim()) return "";
+  const chunks = rawDiff
+    .split(/(?=^diff --git )/m)
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  const safeChunks = chunks.filter((chunk) => {
+    const headerMatch = chunk.match(/^diff --git a\/(.+?) b\/([^\r\n\t]+)$/m);
+    if (!headerMatch) return true;
+    const pathA = headerMatch[1].trim();
+    const pathB = headerMatch[2].trim();
+    return !isSensitiveFilePath(pathA) && !isSensitiveFilePath(pathB);
+  });
+
+  return safeChunks.join("\n\n");
+}
+
 export function collectGitContext(cwd: string = process.cwd(), maxDiffChars = 45000): GitWorkspaceContext {
   const insideWorkTree = safeGit(["rev-parse", "--is-inside-work-tree"], cwd);
   if (insideWorkTree !== "true") {
@@ -258,14 +280,18 @@ export function collectGitContext(cwd: string = process.cwd(), maxDiffChars = 45
     }
   }
 
+  const safeChangedFiles = changedFiles.filter((f) => !isSensitiveFilePath(f));
+  const safeRawDiff = stripSensitiveDiffSections(rawDiff);
+  const safeRawStagedDiff = stripSensitiveDiffSections(rawStagedDiff);
+
   return {
     isGitRepo: true,
     branch,
-    statusShort: statusShort || `HEAD commit (${changedFiles.length} files)`,
-    changedFiles,
-    diff: budgetMultiFileDiff(rawDiff, statSummary, maxDiffChars),
-    stagedDiff: budgetMultiFileDiff(rawStagedDiff, stagedStat, maxDiffChars),
-    rawDiff: rawDiff || rawStagedDiff,
+    statusShort: statusShort || `HEAD commit (${safeChangedFiles.length} files)`,
+    changedFiles: safeChangedFiles,
+    diff: budgetMultiFileDiff(safeRawDiff, statSummary, maxDiffChars),
+    stagedDiff: budgetMultiFileDiff(safeRawStagedDiff, stagedStat, maxDiffChars),
+    rawDiff: safeRawDiff || safeRawStagedDiff,
     recentCommits,
     branchCommitsSinceBase
   };

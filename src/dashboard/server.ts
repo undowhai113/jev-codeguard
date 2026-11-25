@@ -63,7 +63,8 @@ function isTrustedLocalRequest(
   if (origin) {
     const allowedOrigins = new Set([
       `http://localhost:${port}`,
-      `http://127.0.0.1:${port}`
+      `http://127.0.0.1:${port}`,
+      `http://[::1]:${port}`
     ]);
     if (!allowedOrigins.has(origin)) {
       return false;
@@ -1800,11 +1801,14 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
 
     function formatAgentBadgeText(agent) {
       if (agent === "Codex") return "OpenAI Codex";
+      if (agent === "Claude") return "Claude Code";
+      if (agent === "Cursor") return "Cursor";
       if (agent === "Gemini") return "Gemini";
       return "CLI";
     }

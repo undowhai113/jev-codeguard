@@ -5,6 +5,7 @@ import { buildUnverifiableCommandDecision, evaluateCommandGate } from "../core/p
 import { assessCommandShape } from "../core/command-shape.js";
 import { recordSessionEvent } from "../core/event-log.js";
 import { auditCodeWithSkills } from "../core/skill-auditor.js";
+import { buildProjectContextEnvelope } from "../core/context-enricher.js";
 import type { GateVerdict } from "../core/types.js";
 
 export type HookFailMode = "open" | "ask" | "closed";
@@ -113,11 +114,17 @@ export async function runPreToolHook(
         };
       }
 
+      const projectDna = buildProjectContextEnvelope(cwd, [command]);
+      const learnedRules = (projectDna.learnedHumanOverrides ?? []).map(
+        (r) => `[${r.feedbackType}] ${r.rule}`
+      );
       const questions = buildCommandGuardQuestions();
       const { response, latencyMs, cached } = await client.evaluate(
         {
           tool: payload.tool_name ?? payload.toolName ?? "Bash",
-          exact_command: command
+          exact_command: command,
+          workspace: projectDna.workspaceName,
+          ...(learnedRules.length > 0 ? { learned_human_feedback_rules: learnedRules } : {})
         },
         questions,
         { operation: "jev_gate_command" }
@@ -186,9 +193,45 @@ export async function runPreToolHook(
 
     // 2. If intercepting a file write/edit with code
     if (codeContent.trim().length > 0) {
+      const cwd = process.cwd();
+      const projectDna = buildProjectContextEnvelope(cwd, [filePath]);
+      const learnedRules = (projectDna.learnedHumanOverrides ?? []).map(
+        (r) => `[${r.feedbackType}] ${r.rule}`
+      );
       const audit = await auditCodeWithSkills(client, {
         code: codeContent,
-        filePath
+        filePath,
+        projectContext: {
+          workspace: projectDna.workspaceName,
+          stack: projectDna.stackSummary,
+          learned_human_feedback_rules: learnedRules
+        }
+      });
+
+      const probs: Record<string, number> = {
+        security_score_norm: Number((audit.securityScore / 5).toFixed(2))
+      };
+      for (const v of audit.violatedVectors.slice(0, 6)) {
+        probs[v.vector] = Number(v.probability.toFixed(2));
+      }
+      recordSessionEvent({
+        agent: "CLI",
+        workingDirectory: cwd,
+        workspace: projectDna.workspaceName,
+        tool: "jev_audit_code",
+        questionOrTitle: `Hook Code Gate: ${filePath || "inline edit"} (${audit.stack})`,
+        optionsOrInput: {
+          file_path: filePath || "inline",
+          stack: audit.stack
+        },
+        verdict: audit.verdict,
+        selectedOption: `${audit.verdict} (Score ${audit.securityScore.toFixed(1)}/5)`,
+        selectedProbability: Number((audit.securityScore / 5).toFixed(2)),
+        probabilities: probs,
+        directive: audit.summary,
+        latencyMs: audit.latencyMs,
+        costUsd: audit.usage?.cost ?? 0,
+        cached: audit.cached
       });
 
       if (audit.verdict === "BLOCK") {
