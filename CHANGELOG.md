@@ -1,6 +1,29 @@
 # Changelog
 
-All notable changes to `mcp-jev` are documented in this file.
+All notable changes to `jev-codeguard` (`mcp-jev`) are documented in this file.
+
+## [1.2.0] - 2026-11-26
+
+### Added
+- **Live Human-Proxy Autopilot Toggle (Zero-Restart):**
+  - Added `src/core/runtime-config.ts` to persist `autopilot: boolean` cleanly inside `~/.mcp-jev/config.json` (`0600`) without clobbering `apiKey`, with strict precedence (`JEV_AUTOPILOT` env override > `config.json` > safe `false` default).
+  - Added `GET /api/settings` & CSRF-protected `POST /api/settings` to the Live Radar Portal (`127.0.0.1:4399`) with real-time SSE `settings_updated` sync across tabs and `409` feedback when locked by `JEV_AUTOPILOT` env var.
+  - Added a bilingual (`EN | VI`) **Autopilot Mode** toggle card in the Live Radar sidebar, `Claude Code` & `Cursor` agent filters, and responsive mobile layout (`<= 960px`).
+- **Community Setup & CLI Upgrades:**
+  - Added `jev-codeguard setup --autopilot` / `--no-autopilot` flags and `jev-codeguard autopilot-mode [on|off|status]` CLI subcommand.
+  - Auto-installs companion `SKILL.md` into detected `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.gemini/config/skills` folders, and prints a ready-to-paste `CLAUDE.md` / `.cursorrules` / `AGENTS.md` instruction block so agents call `jev_autopilot_decide` before interrupting users.
+
+### Tests
+- Added `tests/autopilot-settings.test.ts` covering config precedence, `apiKey` preservation and non-leakage on `/api/settings`, CSRF & `409` env-lock enforcement, `setup --autopilot`, and live zero-restart switching on `McpJevDispatcher.autopilotDecide()`.
+
+## [1.1.1] - 2026-11-25
+
+### Security & Fixes
+- Guarded `extractFileHeaderContext`, `extractPostEditHunkScopes`, `extractCrossFileContracts`, and `runFastSyntaxProbe` with `isSafeReadableWorkspaceFile()` (workspace containment + sensitive-file blocklist) and stripped accidentally tracked sensitive file sections from `git diff` in `git-collector.ts`.
+- Emitted portable `npx -y jev-codeguard` configs when `setup` runs from `_npx`/`node_modules`, preserved existing `env` keys in `mcp_config.json`, and fixed the missing-key CLI hint.
+- Added dedicated `src/cli/gate.ts` bin entrypoint so `jev-gate` works reliably on Windows shims; logged code-write hook audits to the session ledger and forwarded Project Brain rules into `jev-gate`.
+- Upgraded `assessCommandShape()` with Unicode letter matching and Vietnamese prose stopwords.
+- Added 2 MiB stdin caps, `--port` validation, flag-safe positional parsing, NaN-safe `JEV_TIMEOUT_MS`, bounded telemetry ring buffer, IPv6 `[::1]` dashboard origin, single-quote HTML escaping, `jev_classify_batch` event logging, and `Claude`/`Cursor` agent identity detection.
 
 ## [1.1.0] - 2026-11-18
 

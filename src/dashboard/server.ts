@@ -12,6 +12,8 @@ import {
   recordProjectFeedbackRule,
   removeProjectFeedbackRule
 } from "../core/context-enricher.js";
+import { JEV_POLICY } from "../core/policy-config.js";
+import { getAutopilotRuntimeStatus, updateRuntimeConfig } from "../core/runtime-config.js";
 import { McpJevDispatcher } from "../mcp/server.js";
 
 const MAX_BODY_BYTES = 4096;
@@ -38,6 +40,10 @@ const FeedbackPayloadSchema = z.object({
 const DeleteRulePayloadSchema = z.object({
   workspaceName: z.string().min(1).max(120),
   ruleId: z.string().min(1).max(80)
+});
+
+const SettingsPayloadSchema = z.object({
+  autopilotEnabled: z.boolean()
 });
 
 function isTrustedLocalRequest(
@@ -145,8 +151,8 @@ export function startDashboardServer(options: DashboardServerOptions = {}): Prom
 
   watcherInterval.unref();
 
-  function broadcastEvent(evt: JevSessionEvent): void {
-    const payload = `data: ${JSON.stringify({ type: "new_event", event: evt })}\n\n`;
+  function broadcastPayload(obj: unknown): void {
+    const payload = `data: ${JSON.stringify(obj)}\n\n`;
     for (const client of sseClients) {
       try {
         client.write(payload);
@@ -154,6 +160,24 @@ export function startDashboardServer(options: DashboardServerOptions = {}): Prom
         sseClients.delete(client);
       }
     }
+  }
+
+  function broadcastEvent(evt: JevSessionEvent): void {
+    broadcastPayload({ type: "new_event", event: evt });
+  }
+
+  function readPublicSettings() {
+    const guardLockWindowMin = Math.max(
+      1,
+      Math.round(JEV_POLICY.autopilot.guardEscalationWindowMs / 60000)
+    );
+    const st = getAutopilotRuntimeStatus(process.env, guardLockWindowMin);
+    return {
+      autopilotEnabled: st.enabled,
+      source: st.source,
+      envLocked: st.envLocked,
+      guardLockWindowMin: st.guardLockWindowMin
+    };
   }
 
   const server = http.createServer(async (req, res) => {
@@ -194,6 +218,61 @@ export function startDashboardServer(options: DashboardServerOptions = {}): Prom
       lastSeenId = null;
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (req.method === "GET" && urlObj.pathname === "/api/settings") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ ok: true, ...readPublicSettings() }));
+      return;
+    }
+
+    if (req.method === "POST" && urlObj.pathname === "/api/settings") {
+      let validated: z.infer<typeof SettingsPayloadSchema>;
+      try {
+        const rawBody = await readBoundedBody(req, MAX_BODY_BYTES);
+        const jsonBody: unknown = rawBody.trim() ? JSON.parse(rawBody) : {};
+        validated = SettingsPayloadSchema.parse(jsonBody);
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Invalid settings payload: expected { autopilotEnabled: boolean }"
+          })
+        );
+        return;
+      }
+
+      const current = readPublicSettings();
+      if (current.envLocked) {
+        res.writeHead(409, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error:
+              "Autopilot is controlled by the JEV_AUTOPILOT environment variable. Unset JEV_AUTOPILOT to toggle it from Live Radar.",
+            ...current
+          })
+        );
+        return;
+      }
+
+      try {
+        updateRuntimeConfig({ autopilot: validated.autopilotEnabled });
+        const next = readPublicSettings();
+        broadcastPayload({ type: "settings_updated", settings: next });
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true, ...next }));
+      } catch {
+        res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Failed to persist runtime settings."
+          })
+        );
+      }
       return;
     }
 
@@ -369,6 +448,8 @@ export function startDashboardServer(options: DashboardServerOptions = {}): Prom
 function computeAggregateStats(events: JevSessionEvent[]) {
   let codexCount = 0;
   let geminiCount = 0;
+  let claudeCount = 0;
+  let cursorCount = 0;
   let cliCount = 0;
   let autopilotSavedCount = 0;
   let askHumanCount = 0;
@@ -379,6 +460,8 @@ function computeAggregateStats(events: JevSessionEvent[]) {
   for (const e of events) {
     if (e.agent === "Codex") codexCount++;
     else if (e.agent === "Gemini") geminiCount++;
+    else if (e.agent === "Claude") claudeCount++;
+    else if (e.agent === "Cursor") cursorCount++;
     else cliCount++;
 
     if (e.workspace) workspaces.add(e.workspace);
@@ -397,6 +480,8 @@ function computeAggregateStats(events: JevSessionEvent[]) {
     totalEvents: events.length,
     codexCount,
     geminiCount,
+    claudeCount,
+    cursorCount,
     cliCount,
     workspaceCount: workspaces.size,
     autopilotSavedCount,
@@ -491,6 +576,7 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       flex-direction: column;
       justify-content: space-between;
       padding: 18px 14px;
+      overflow-y: auto;
       user-select: none;
     }
 
@@ -1000,6 +1086,16 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       color: var(--gemini-dark);
     }
 
+    .badge-agent.Claude {
+      background: #ffedd5;
+      color: #9a3412;
+    }
+
+    .badge-agent.Cursor {
+      background: #ede9fe;
+      color: #5b21b6;
+    }
+
     .badge-agent.CLI {
       background: var(--amber-bg);
       color: var(--amber-text);
@@ -1058,6 +1154,7 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       height: 100%;
       width: 100%;
       border-radius: 999px;
+      background: var(--codex-green);
       transform-origin: left center;
       transform: scaleX(0);
       will-change: transform;
@@ -1069,6 +1166,14 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
 
     .bar-fill.Gemini {
       background: var(--gemini-blue);
+    }
+
+    .bar-fill.Claude {
+      background: #ea580c;
+    }
+
+    .bar-fill.Cursor {
+      background: #7c3aed;
     }
 
     .bar-fill.CLI {
@@ -1427,6 +1532,205 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       color: var(--text-ink);
       box-shadow: var(--shadow-xs);
     }
+
+    .agent-dot-ring.claude {
+      background: #ffedd5;
+    }
+
+    .agent-dot-ring.claude::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #ea580c;
+    }
+
+    .agent-dot-ring.cursor {
+      background: #ede9fe;
+    }
+
+    .agent-dot-ring.cursor::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #7c3aed;
+    }
+
+    /* Autopilot Live Mode Control */
+    .autopilot-card {
+      border: 1px solid var(--border-light);
+      background: var(--bg-canvas);
+      border-radius: 10px;
+      padding: 11px 12px;
+      margin-bottom: 12px;
+      transition: background-color 0.16s ease, border-color 0.16s ease;
+    }
+
+    .autopilot-card.is-on {
+      background: var(--codex-soft);
+      border-color: var(--codex-border);
+    }
+
+    .ap-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .ap-title-group {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-ink);
+    }
+
+    .ap-switch {
+      appearance: none;
+      position: relative;
+      width: 38px;
+      height: 22px;
+      border-radius: 999px;
+      border: 1px solid var(--border-med);
+      background: #cbd5e1;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background-color 0.16s ease, border-color 0.16s ease;
+    }
+
+    .ap-switch:focus-visible {
+      outline: 2px solid var(--codex-green);
+      outline-offset: 2px;
+    }
+
+    .ap-switch[aria-checked="true"] {
+      background: var(--codex-green);
+      border-color: #059669;
+    }
+
+    .ap-switch:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .ap-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: #ffffff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.24);
+      transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+      pointer-events: none;
+    }
+
+    .ap-switch[aria-checked="true"] .ap-knob {
+      transform: translateX(16px);
+    }
+
+    .ap-meta {
+      margin-top: 7px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .ap-badge {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--bg-subtle);
+      color: var(--text-slate);
+      border: 1px solid var(--border-light);
+    }
+
+    .autopilot-card.is-on .ap-badge {
+      background: var(--codex-bg);
+      color: var(--codex-dark);
+      border-color: var(--codex-border);
+    }
+
+    .ap-desc {
+      font-size: 11.5px;
+      line-height: 1.4;
+      color: var(--text-muted);
+    }
+
+    .autopilot-card.is-on .ap-desc {
+      color: #065f46;
+    }
+
+    .ap-error {
+      font-size: 11px;
+      color: var(--rose-text);
+      display: none;
+    }
+
+    .ap-error.visible {
+      display: block;
+    }
+
+    /* Responsive Mobile & Narrow Viewport Support */
+    @media (max-width: 960px) {
+      body {
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-light);
+        padding: 14px 16px;
+      }
+
+      .main-shell {
+        height: auto;
+        overflow: visible;
+      }
+
+      .topbar {
+        height: auto;
+        padding: 12px 16px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .search-input {
+        width: 100%;
+        min-width: 160px;
+      }
+
+      .workspace-scroll {
+        overflow: visible;
+        padding: 14px 16px;
+      }
+
+      .kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .split-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .inspector-sticky {
+        position: static;
+      }
+    }
   </style>
 </head>
 <body>
@@ -1481,6 +1785,26 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
           </span>
           <span class="agent-dot-ring gemini"></span>
         </button>
+
+        <button class="side-btn" data-agent-filter="Claude" type="button">
+          <span class="side-btn-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            <span>Claude Code (<span id="sideCountClaude">0</span>)</span>
+          </span>
+          <span class="agent-dot-ring claude"></span>
+        </button>
+
+        <button class="side-btn" data-agent-filter="Cursor" type="button">
+          <span class="side-btn-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2">
+              <polygon points="3 3 21 12 12 14 10 21 3 3"></polygon>
+            </svg>
+            <span>Cursor (<span id="sideCountCursor">0</span>)</span>
+          </span>
+          <span class="agent-dot-ring cursor"></span>
+        </button>
       </nav>
 
       <div class="side-group-title" id="lblActiveWorkspaces">Active Workspaces</div>
@@ -1488,6 +1812,32 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
     </div>
 
     <div class="sidebar-bottom">
+      <div class="autopilot-card" id="autopilotCard">
+        <div class="ap-row">
+          <span class="ap-title-group">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+            <span id="lblAutopilotTitle">Autopilot Mode</span>
+          </span>
+          <button
+            class="ap-switch"
+            id="btnAutopilotToggle"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-labelledby="lblAutopilotTitle"
+          >
+            <span class="ap-knob"></span>
+          </button>
+        </div>
+        <div class="ap-meta">
+          <span class="ap-badge" id="apBadge">OFF · Ask Human</span>
+          <div class="ap-desc" id="apDesc">Pauses to ask you on choices. Toggle on to auto-decide reversible tech options.</div>
+          <div class="ap-error" id="apError" role="alert"></div>
+        </div>
+      </div>
+
       <button class="side-btn" id="btnNotify" type="button">
         <span class="side-btn-left">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1695,6 +2045,12 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
         domainAuthLabel: "Domain / Auth Fingerprint",
         learnedRulesHeader: (n) => \`Learned Human Override Rules (\${n})\`,
         addRulePrompt: (ws) => \`Enter a custom rule or invariant for workspace \${ws}:\`,
+        autopilotTitle: "Autopilot Mode",
+        apBadgeOn: "ON · Auto-Decide",
+        apBadgeOff: "OFF · Ask Human",
+        apDescOn: (m) => \`Auto-decides reversible tech choices (P>=0.65). \${m}m guard lock active.\`,
+        apDescOff: "Asks you before choosing. Turn on for hands-free reversible tech decisions.",
+        apEnvLocked: (on) => \`Locked \${on ? "ON" : "OFF"} by JEV_AUTOPILOT env var.\`,
         metrics: {
           spec_fulfilled: "Spec Alignment (P(fulfills_spec))",
           quality_norm: "Code Quality Score",
@@ -1771,6 +2127,12 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
         domainAuthLabel: "Đặc trưng Domain/Auth",
         learnedRulesHeader: (n) => \`Quy tắc hiệu chỉnh Jev đã học (\${n})\`,
         addRulePrompt: (ws) => \`Nhập quy tắc bắt buộc hoặc lưu ý đặc thù cho dự án \${ws}:\`,
+        autopilotTitle: "Chế Độ Tự Quyết",
+        apBadgeOn: "BẬT · Tự quyết kỹ thuật",
+        apBadgeOff: "TẮT · Hỏi người dùng",
+        apDescOn: (m) => \`Tự chốt câu hỏi kỹ thuật đảo ngược được (P>=0.65). Khóa chống lách \${m}p vẫn bật.\`,
+        apDescOff: "Luôn hỏi lại bạn trước khi chọn. Bật để Agent tự quyết không làm phiền.",
+        apEnvLocked: (on) => \`Đang khóa \${on ? "BẬT" : "TẮT"} bởi biến môi trường JEV_AUTOPILOT.\`,
         metrics: {
           spec_fulfilled: "Độ khớp yêu cầu (Spec Fulfilled)",
           quality_norm: "Chất lượng Code (Code Quality)",
@@ -1795,6 +2157,12 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
     let searchQuery = "";
     let selectedEventId = null;
     let desktopNotifyEnabled = false;
+    let runtimeSettings = {
+      autopilotEnabled: false,
+      source: "default",
+      envLocked: false,
+      guardLockWindowMin: 15
+    };
 
     function escapeHtml(str) {
       return String(str ?? "")
@@ -1857,14 +2225,66 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       document.getElementById("lblBrainModalTitle").textContent = tr.brainModalTitle;
       document.getElementById("lblBrainModalSub").textContent = tr.brainModalSub;
       document.getElementById("btnCloseBrain").textContent = tr.closeEsc;
+      renderAutopilotSettings();
+    }
+
+    function renderAutopilotSettings(errorText) {
+      const tr = t();
+      const card = document.getElementById("autopilotCard");
+      const btn = document.getElementById("btnAutopilotToggle");
+      const titleEl = document.getElementById("lblAutopilotTitle");
+      const badgeEl = document.getElementById("apBadge");
+      const descEl = document.getElementById("apDesc");
+      const errEl = document.getElementById("apError");
+      if (!card || !btn) return;
+
+      const on = Boolean(runtimeSettings.autopilotEnabled);
+      const locked = Boolean(runtimeSettings.envLocked);
+      const lockMin = runtimeSettings.guardLockWindowMin || 15;
+
+      card.classList.toggle("is-on", on);
+      btn.setAttribute("aria-checked", on ? "true" : "false");
+      btn.disabled = locked;
+      titleEl.textContent = tr.autopilotTitle;
+      badgeEl.textContent = on ? tr.apBadgeOn : tr.apBadgeOff;
+      descEl.textContent = locked
+        ? tr.apEnvLocked(on)
+        : on
+          ? tr.apDescOn(lockMin)
+          : tr.apDescOff;
+
+      if (errorText) {
+        errEl.textContent = errorText;
+        errEl.classList.add("visible");
+      } else {
+        errEl.textContent = "";
+        errEl.classList.remove("visible");
+      }
+    }
+
+    async function loadRuntimeSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        if (!res.ok) return;
+        const data = await res.json();
+        runtimeSettings = {
+          autopilotEnabled: Boolean(data.autopilotEnabled),
+          source: data.source || "default",
+          envLocked: Boolean(data.envLocked),
+          guardLockWindowMin: Number(data.guardLockWindowMin) || 15
+        };
+        renderAutopilotSettings();
+      } catch {}
     }
 
     function computeLocalStats(events) {
-      let codexCount = 0, geminiCount = 0, cliCount = 0, autopilotSavedCount = 0, totalLatency = 0, totalCost = 0;
+      let codexCount = 0, geminiCount = 0, claudeCount = 0, cursorCount = 0, cliCount = 0, autopilotSavedCount = 0, totalLatency = 0, totalCost = 0;
       const workspaces = new Set();
       for (const e of events) {
         if (e.agent === "Codex") codexCount++;
         else if (e.agent === "Gemini") geminiCount++;
+        else if (e.agent === "Claude") claudeCount++;
+        else if (e.agent === "Cursor") cursorCount++;
         else cliCount++;
         if (e.workspace) workspaces.add(e.workspace);
         if (e.verdict === "AUTOPILOT_PROCEED" || e.verdict === "ALLOW") autopilotSavedCount++;
@@ -1875,6 +2295,8 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
         totalEvents: events.length,
         codexCount,
         geminiCount,
+        claudeCount,
+        cursorCount,
         cliCount,
         workspaceCount: workspaces.size,
         autopilotSavedCount,
@@ -1932,13 +2354,28 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       document.getElementById("sideCountAll").textContent = stats.totalEvents;
       document.getElementById("sideCountCodex").textContent = stats.codexCount;
       document.getElementById("sideCountGemini").textContent = stats.geminiCount;
+      const claudeEl = document.getElementById("sideCountClaude");
+      if (claudeEl) claudeEl.textContent = stats.claudeCount || 0;
+      const cursorEl = document.getElementById("sideCountCursor");
+      if (cursorEl) cursorEl.textContent = stats.cursorCount || 0;
 
       document.getElementById("kpiProjects").textContent = (stats.workspaceCount || 0) + " " + t().workspacesUnit;
 
-      const pairTotal = stats.codexCount + stats.geminiCount;
-      const cPct = pairTotal === 0 ? 50 : Math.round((stats.codexCount / pairTotal) * 100);
-      const gPct = pairTotal === 0 ? 50 : 100 - cPct;
-      document.getElementById("kpiAgentSplit").textContent = \`Codex \${cPct}% · Gemini \${gPct}%\`;
+      const agentPairs = [
+        ["Codex", stats.codexCount || 0],
+        ["Gemini", stats.geminiCount || 0],
+        ["Claude", stats.claudeCount || 0],
+        ["Cursor", stats.cursorCount || 0],
+        ["CLI", stats.cliCount || 0]
+      ].filter((pair) => pair[1] > 0);
+      if (agentPairs.length === 0) {
+        document.getElementById("kpiAgentSplit").textContent = "Codex 0% · Gemini 0%";
+      } else {
+        const total = stats.totalEvents || 1;
+        document.getElementById("kpiAgentSplit").textContent = agentPairs
+          .map(([name, cnt]) => \`\${name} \${Math.round((cnt / total) * 100)}%\`)
+          .join(" · ");
+      }
 
       const rate = stats.totalEvents > 0
         ? ((stats.autopilotSavedCount / stats.totalEvents) * 100).toFixed(1) + "%"
@@ -2286,6 +2723,14 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
               renderSessionList();
               showToast(evt);
             }
+          } else if (payload.type === "settings_updated" && payload.settings) {
+            runtimeSettings = {
+              autopilotEnabled: Boolean(payload.settings.autopilotEnabled),
+              source: payload.settings.source || "config",
+              envLocked: Boolean(payload.settings.envLocked),
+              guardLockWindowMin: Number(payload.settings.guardLockWindowMin) || 15
+            };
+            renderAutopilotSettings();
           }
         } catch {}
       };
@@ -2484,8 +2929,51 @@ function renderPortalHtml(_port: number, csrfToken: string): string {
       }
     });
 
+    document.getElementById("btnAutopilotToggle").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      const nextValue = !runtimeSettings.autopilotEnabled;
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Jev-CSRF": JEV_CSRF_TOKEN },
+          body: JSON.stringify({ autopilotEnabled: nextValue })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          runtimeSettings = {
+            autopilotEnabled: Boolean(data.autopilotEnabled),
+            source: data.source || "config",
+            envLocked: Boolean(data.envLocked),
+            guardLockWindowMin: Number(data.guardLockWindowMin) || 15
+          };
+          renderAutopilotSettings();
+        } else {
+          if (typeof data.autopilotEnabled === "boolean" || typeof data.envLocked === "boolean") {
+            runtimeSettings = {
+              autopilotEnabled:
+                typeof data.autopilotEnabled === "boolean"
+                  ? data.autopilotEnabled
+                  : runtimeSettings.autopilotEnabled,
+              source: data.source || runtimeSettings.source,
+              envLocked:
+                typeof data.envLocked === "boolean" ? data.envLocked : runtimeSettings.envLocked,
+              guardLockWindowMin:
+                Number(data.guardLockWindowMin) || runtimeSettings.guardLockWindowMin
+            };
+          }
+          renderAutopilotSettings(data.error || "Unable to update Autopilot setting.");
+        }
+      } catch {
+        renderAutopilotSettings("Network error updating Autopilot setting.");
+      } finally {
+        btn.disabled = Boolean(runtimeSettings.envLocked);
+      }
+    });
+
     applyStaticTranslations();
-    loadInitialEvents().then(connectSse);
+    Promise.all([loadRuntimeSettings(), loadInitialEvents()]).then(connectSse);
   </script>
 </body>
 </html>`;

@@ -32,7 +32,8 @@ It pairs your frontier **System-2** coding agent with **[TypeSafe AI's Jev](http
 - **Chặn lệnh nguy hiểm trước khi chạy (`jev_guard_action` / `jev-gate`):** Chấm xác suất an toàn trong ~150ms, tự động phát hiện và từ chối nếu Agent cố tình mô tả văn xuôi thay vì đưa câu lệnh thật.
 - **Chấm điểm `git diff` tốn 0 token của Agent (`jev_verify_diff`):** Tự đọc code thay đổi dưới local (kể cả file mới chưa `git add`), kết hợp phân tích AST (`ts-morph`, Python `ast`), linter (`oxlint`, `ruff`) và đồ thị phụ thuộc (`codegraph`) để bắt lỗi bảo mật/regression trước khi báo cáo xong việc.
 - **Audit bảo mật không làm phình ngữ cảnh (`jev_audit_code`):** Chỉ trích quy tắc sửa lỗi khi rủi ro vượt ngưỡng (`P >= 0.55`) — ưu tiên skill bạn đã cài trên máy, nếu chưa có thì dùng bộ skill đi kèm gói (OpenAI `security-best-practices` Apache-2.0, GreenSock `gsap-performance` MIT, Matt Pocock `codebase-design` MIT; xem [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
-- **Dashboard trực tiếp `http://127.0.0.1:4399` (Song ngữ `EN | VI`):** Theo dõi thời gian thực mọi câu hỏi & phán quyết của các Agent ở nhiều cửa sổ terminal và dạy lại quy tắc riêng cho từng dự án (**Project Brain**).
+- **Tự quyết câu hỏi kỹ thuật không làm phiền người dùng (`jev_autopilot_decide` — Opt-in):** Mặc định tắt để an toàn (`ASK_HUMAN`). Bật ngay 1 cú click trên **Live Radar `:4399`**, hoặc chạy `npx -y jev-codeguard setup --autopilot` / `npx -y jev-codeguard autopilot-mode on` để Jev tự chốt các lựa chọn kỹ thuật đảo ngược được (thư viện, cấu trúc folder, chiến lược test...) mà vẫn giữ nguyên **khóa chống lách 15 phút** và tự hỏi lại bạn khi đụng chuyện nghiệp vụ/rủi ro.
+- **Dashboard trực tiếp `http://127.0.0.1:4399` (Song ngữ `EN | VI`):** Theo dõi thời gian thực mọi câu hỏi & phán quyết của các Agent (**Claude Code, Codex, Cursor, Gemini, CLI**), gạt bật/tắt **Autopilot Mode** nóng, và dạy lại quy tắc riêng cho từng dự án (**Project Brain**).
 
 </details>
 
@@ -103,9 +104,14 @@ flowchart TB
 ### 2. Install, Build & Configure
 
 ```bash
-# Option A: Install globally from npm (once published)
-npm install -g jev-codeguard
-jev-codeguard setup --api-key jev_live_your_key_here
+# Option A: Quickstart from npm (zero clone required — emits portable npx IDE snippets)
+npx -y jev-codeguard setup --api-key jev_live_your_key_here
+
+# Enable hands-free Human-Proxy Autopilot during setup (or toggle anytime on Live Radar :4399)
+npx -y jev-codeguard setup --api-key jev_live_your_key_here --autopilot
+
+# Toggle Autopilot mode later from any terminal (syncs live across all running agents)
+npx -y jev-codeguard autopilot-mode on    # or: off | status
 
 # Option B: Clone and build from source
 git clone https://github.com/undowhai113/jev-codeguard.git
@@ -115,7 +121,7 @@ npm run build
 node dist/src/cli/index.js setup --api-key jev_live_your_key_here
 ```
 
-Run the test suite (46 unit, calibration, concurrency, and security boundary tests):
+Run the test suite (unit, calibration, concurrency, security hardening, and autopilot settings tests):
 
 ```bash
 npm test
@@ -217,10 +223,14 @@ Scores code snippets, files, or the local `git diff` across **9 OWASP/AppSec vec
 - **Auto-Detected Stacks:** `nextjs`, `express`, `react`, `vue`, `frontend`, `fastapi`, `django`, `flask`, `golang`, `gsap`, `general`.
 - **Lazy Skill Escalation:** Only security vectors can `BLOCK`; GSAP and architecture vectors surface non-blocking advisory guidance. When a vector crosses the threshold, Jev quotes the matching section of a remediation skill: your own installed copy first (`JEV_SKILLS_DIR`, `~/.gemini/config/skills`, `~/.claude/skills`, `~/.agents/skills`, `~/.cursor/skills`), otherwise the copy **bundled with the package** — OpenAI's `security-best-practices` (Apache-2.0), GreenSock's `gsap-performance` (MIT) and Matt Pocock's `codebase-design` (MIT), vendored verbatim at pinned commits (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). Each excerpt reports `skillSource: "local" | "bundled" | "builtin"`; an unrecognised (`general`) stack gets short built-in guidance instead.
 
-### 4. `jev_autopilot_decide` — Opt-In Human-Proxy Technical Recommender
-Evaluates multiple-choice technical trade-offs (library choice, transaction strategy, module seam) against developer engineering standards.
-- **Safe by Default (`ASK_HUMAN`):** Unless `JEV_AUTOPILOT=1` is explicitly enabled in the server environment, `jev_autopilot_decide` **always** returns `mode: "ASK_HUMAN"` together with Jev's calibrated recommendation (`selectedOption`) so the user stays in control.
-- **Anti-Bypass Lock:** Even when `JEV_AUTOPILOT=1` is enabled, `jev_autopilot_decide` refuses to auto-proceed (`escalationReason: "recent_guard_escalation"`) within **15 minutes** of any `jev_guard_action` `ASK_USER` or `BLOCK` in the same workspace (tracked both in-memory and across separate agent processes via `~/.mcp-jev/events.jsonl`), and enforces a hard floor of `min_confidence >= 0.65`.
+### 4. `jev_autopilot_decide` — Opt-In Human-Proxy Technical Auto-Decider
+Evaluates multiple-choice technical trade-offs (library choice, transaction strategy, module seam, folder layout) against developer engineering standards and your repo's Project Brain so coding agents stop interrupting you on routine reversible decisions.
+- **Safe by Default (`ASK_HUMAN`), Live Toggleable:** Disabled by default. Enable hands-free `AUTOPILOT_PROCEED` anytime via:
+  1. The **Autopilot Mode** switch on the Live Radar Portal (`http://127.0.0.1:4399`) — takes effect immediately across all running agents without restarting your IDE;
+  2. `npx -y jev-codeguard setup --autopilot` or `npx -y jev-codeguard autopilot-mode on`;
+  3. `JEV_AUTOPILOT=1` in your MCP server `env` (locks the state against UI toggles).
+- **Anti-Bypass Lock:** Even when Autopilot is enabled, `jev_autopilot_decide` refuses to auto-proceed (`escalationReason: "recent_guard_escalation"`) within **15 minutes** of any `jev_guard_action` `ASK_USER` or `BLOCK` in the same workspace (tracked both in-memory and across separate agent processes via `~/.mcp-jev/events.jsonl`), requires reversible technical scope (`requiresHuman < 0.45`), and enforces a hard floor of `min_confidence >= 0.65`.
+- **Agent Prompt Hook (`CLAUDE.md` / `.cursorrules` / `AGENTS.md`):** `jev-codeguard setup` auto-installs `SKILL.md` into detected IDE skill directories (`~/.gemini/config/skills`, `~/.claude/skills`, `~/.cursor/skills`, `~/.codex/skills`) and prints a ready-to-paste rules block so every coding agent calls `jev_autopilot_decide` before asking you.
 
 ### 5. `jev_prune_context` — Out-of-Context Parallel File/Skill Filter
 Scores up to **100 candidate `{ id, summary }` items** against a task description in **one ~150ms parallel request**, returning only candidates with `P(relevant) >= threshold` (default `0.60`). Keeps irrelevant files out of your System-2 context window.
@@ -273,8 +283,13 @@ mcp-jev serve
 # Launch standalone Live Radar Portal on a custom port
 mcp-jev dashboard --port 4399
 
-# Save API key (~/.mcp-jev/config.json, mode 0600), install SKILL.md, print IDE configs
-mcp-jev setup --api-key jev_live_your_key_here
+# Save API key (~/.mcp-jev/config.json, mode 0600), install SKILL.md, print IDE & agent rules
+npx -y jev-codeguard setup --api-key jev_live_your_key_here --autopilot
+
+# Toggle persistent Human-Proxy Autopilot on/off across all running agents
+npx -y jev-codeguard autopilot-mode on
+npx -y jev-codeguard autopilot-mode off
+npx -y jev-codeguard autopilot-mode status
 
 # Run Zero-Trust PreToolUse Hook Firewall (reads Claude/Cursor JSON from stdin or flags)
 jev-gate --command "rm -rf dist && npm run build"

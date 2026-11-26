@@ -4,6 +4,7 @@ import { startStdioServer, McpJevDispatcher } from "../mcp/server.js";
 import { runPreToolHook } from "./hook-runner.js";
 import { runSetup } from "./setup.js";
 import { startDashboardServer } from "../dashboard/server.js";
+import { getAutopilotRuntimeStatus, updateRuntimeConfig } from "../core/runtime-config.js";
 
 const MAX_STDIN_BYTES = 2 * 1024 * 1024;
 
@@ -179,16 +180,65 @@ async function main(): Promise<void> {
     process.exit(res.decision.verdict === "BLOCK" ? 2 : 0);
   }
 
+  if (subcommand === "autopilot-mode") {
+    const action = (firstPositionalArg(args) ?? "status").toLowerCase();
+    if (action === "on" || action === "enable" || action === "true") {
+      const saved = updateRuntimeConfig({ autopilot: true });
+      const status = getAutopilotRuntimeStatus();
+      console.log(
+        `[jev-codeguard autopilot]: Saved autopilot=true to ${saved.configPath} (effective=${status.enabled}, source=${status.source}).`
+      );
+      if (status.envLocked) {
+        console.log(
+          `[!] Note: JEV_AUTOPILOT=${process.env.JEV_AUTOPILOT} in your environment overrides config.json.`
+        );
+      }
+      return;
+    }
+    if (action === "off" || action === "disable" || action === "false") {
+      const saved = updateRuntimeConfig({ autopilot: false });
+      const status = getAutopilotRuntimeStatus();
+      console.log(
+        `[jev-codeguard autopilot]: Saved autopilot=false to ${saved.configPath} (effective=${status.enabled}, source=${status.source}).`
+      );
+      if (status.envLocked) {
+        console.log(
+          `[!] Note: JEV_AUTOPILOT=${process.env.JEV_AUTOPILOT} in your environment overrides config.json.`
+        );
+      }
+      return;
+    }
+    if (action === "status") {
+      const status = getAutopilotRuntimeStatus();
+      console.log(JSON.stringify(status, null, 2));
+      return;
+    }
+    console.error(
+      `[jev-codeguard autopilot]: Unknown action "${action}". Expected one of: on, off, status.`
+    );
+    process.exit(1);
+  }
+
   if (subcommand === "setup" || subcommand === "init") {
     const apiKey = getArgValue(args, "--api-key");
     const portable = args.includes("--portable") ? true : undefined;
-    const report = runSetup({ apiKey, portable });
+    const autopilot = args.includes("--autopilot")
+      ? true
+      : args.includes("--no-autopilot")
+        ? false
+        : undefined;
+    const report = runSetup({ apiKey, portable, autopilot });
     console.log("=== Jev CodeGuard Setup Complete ===");
     if (report.configSavedPath) {
-      console.log(`[+] Saved API key config to: ${report.configSavedPath}`);
+      console.log(`[+] Saved runtime config to: ${report.configSavedPath}`);
     }
-    if (report.skillInstalledPath) {
-      console.log(`[+] Installed companion skill to: ${report.skillInstalledPath}`);
+    console.log(
+      `[+] Human-Proxy Autopilot Mode: ${report.autopilotEnabled ? "ENABLED (auto-decides reversible tech choices; 15m guard lock active)" : "OFF (safe default — pass --autopilot or toggle on Live Radar :4399)"}`
+    );
+    if (report.installedSkillPaths.length > 0) {
+      for (const p of report.installedSkillPaths) {
+        console.log(`[+] Installed companion skill to: ${p}`);
+      }
     }
     console.log("\n--- 1. Add to MCP Settings (Antigravity / Claude Code / Cursor / Windsurf) ---");
     console.log(report.mcpConfigSnippet);
@@ -196,16 +246,19 @@ async function main(): Promise<void> {
     console.log(report.codexTomlSnippet);
     console.log("\n--- 3. Optional Zero-Trust PreToolUse Hook (.claude/settings.json) ---");
     console.log(report.claudeHookSnippet);
+    console.log("\n--- 4. Agent Instructions (CLAUDE.md / .cursorrules / AGENTS.md) ---");
+    console.log(report.agentRulesSnippet);
     return;
   }
 
-  console.log(`jev-codeguard v1.1.1 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
+  console.log(`jev-codeguard v1.2.0 — System-1 Decision Engine, Skill Auditor & Live Radar Portal
 
 Usage:
   jev-codeguard serve                                                        Start MCP stdio server + auto-start Radar Portal (default)
   jev-codeguard dashboard [--port 4399]                                      Launch standalone Live Radar Portal (http://localhost:4399)
-  jev-codeguard setup [--api-key <key>] [--portable]                         Save API key (0600), install SKILL.md, and print IDE configs
-  jev-codeguard autopilot --question "<q>" --opt A="desc" --opt B="desc"     Run Human-Proxy Autopilot (auto-proceeds only with JEV_AUTOPILOT=1)
+  jev-codeguard setup [--api-key <key>] [--autopilot] [--portable]           Save config (0600), install SKILL.md, and print IDE configs
+  jev-codeguard autopilot-mode [on|off|status]                               Toggle persistent Human-Proxy Autopilot across all agents
+  jev-codeguard autopilot --question "<q>" --opt A="desc" --opt B="desc"     Run Human-Proxy Autopilot (reversible tech choices)
   jev-codeguard gate [--command "<cmd>" | --file <path>]                     Run Zero-Trust PreToolUse Hook Firewall (stdin or flags)
   jev-codeguard audit [--file <path>]                                        Run Skill-Backed Security & Quality Audit on file or git diff
   jev-codeguard verify-diff --spec "<spec>"                                  Run Zero-Token Local Git Diff Verification Gate

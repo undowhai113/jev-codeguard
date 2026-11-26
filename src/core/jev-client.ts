@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { DecisionCache } from "./cache.js";
+import { getRuntimeConfigPath } from "./runtime-config.js";
 import { TelemetryTracker } from "./telemetry.js";
 import type { GateVerdict, JevQuestion, JevRequest, JevResponse } from "./types.js";
 
@@ -71,7 +72,9 @@ export class JevClient {
         : safeDefaultTimeout;
     this.retryDelayMs = options.retryDelayMs ?? 120;
     this.configPath =
-      options.configPath ?? path.join(os.homedir(), ".mcp-jev", "config.json");
+      options.configPath ??
+      getRuntimeConfigPath() ??
+      path.join(os.homedir(), ".mcp-jev", "config.json");
     this.cache = options.cache ?? new DecisionCache();
     this.telemetry = options.telemetry ?? new TelemetryTracker();
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;

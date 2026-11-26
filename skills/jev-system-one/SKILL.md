@@ -16,9 +16,9 @@ Instead of wasting your context window or relying on uncalibrated self-assessmen
 ## When to Invoke Each `mcp-jev` Tool
 
 ### 0. Multiple-Choice Technical Questions $\rightarrow$ `jev_autopilot_decide` (Human-Proxy Recommender)
-- Before asking the user to choose between technical options (architecture, library, test seam, folder layout), you may call `jev_autopilot_decide` for a calibrated recommendation.
-- Autopilot is **disabled by default** (the server must run with `JEV_AUTOPILOT=1`). When disabled it always returns `ASK_HUMAN` together with Jev's recommended option.
-  - `mode === "AUTOPILOT_PROCEED"` (enabled, $P \ge 0.65$, reversible technical choice): you may proceed with `selectedOption`; state the choice in one line and still ask the user if new risk, cost, or scope appears.
+- Before asking the user to choose between technical options (architecture, library, test seam, folder layout), call `jev_autopilot_decide` first for a calibrated decision.
+- Autopilot is **disabled by default** (`ASK_HUMAN`). Users can enable it anytime via `JEV_AUTOPILOT=1`, `jev-codeguard setup --autopilot`, `jev-codeguard autopilot-mode on`, or the **Autopilot toggle** on the Live Radar Portal (`http://127.0.0.1:4399`).
+  - `mode === "AUTOPILOT_PROCEED"` (enabled, $P \ge 0.65$, reversible technical choice): proceed with `selectedOption` without interrupting the user; state the choice in one line and still ask the user if new risk, cost, or scope appears.
   - `mode === "ASK_HUMAN"`: ask the user, listing `selectedOption` first as `(Recommended)`.
 - Never use `jev_autopilot_decide` to get past a `jev_guard_action` `ASK_USER`/`BLOCK`. Within 15 minutes of such a guard verdict in the same workspace it always returns `ASK_HUMAN`.
 - Product scope, deliverable size, credentials, billing, and anything the user already asked to confirm are the user's decisions, not autopilot's.

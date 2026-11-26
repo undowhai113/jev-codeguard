@@ -970,7 +970,7 @@ export function createMcpJevServer(client?: JevClient): McpServer {
   const dispatcher = new McpJevDispatcher(client);
   const server = new McpServer({
     name: "mcp-jev",
-    version: "1.1.1"
+    version: "1.2.0"
   });
 
   server.tool(
@@ -1166,7 +1166,7 @@ export function createMcpJevServer(client?: JevClient): McpServer {
 
   server.tool(
     "jev_autopilot_decide",
-    "Human-Proxy Autopilot Decision Maker (disabled by default; enabled only when the server runs with JEV_AUTOPILOT=1). Call it before asking the user a multiple-choice technical question. Returns `AUTOPILOT_PROCEED` only when autopilot is enabled, the choice is a clear reversible engineering decision (P >= 0.65), and jev_guard_action has not returned ASK_USER/BLOCK in this workspace within the last 15 minutes. Otherwise returns `ASK_HUMAN` with Jev's recommended option to list first.",
+    "Human-Proxy Autopilot Decision Maker (disabled by default; enable via JEV_AUTOPILOT=1, `jev-codeguard autopilot-mode on`, `jev-codeguard setup --autopilot`, or the Live Radar toggle on 127.0.0.1:4399). Call it before asking the user a multiple-choice technical question. Returns `AUTOPILOT_PROCEED` only when autopilot is enabled, the choice is a clear reversible engineering decision (P >= 0.65), and jev_guard_action has not returned ASK_USER/BLOCK in this workspace within the last 15 minutes. Otherwise returns `ASK_HUMAN` with Jev's recommended option to list first.",
     {
       question: z.string().describe("The question the coding agent is considering asking the user"),
       options: z

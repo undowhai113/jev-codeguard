@@ -147,8 +147,13 @@ export const JEV_POLICY: Readonly<JevPolicy> = Object.freeze({
   })
 });
 
-/** Autopilot is opt-in: it only auto-proceeds when JEV_AUTOPILOT=1 (or "true"). */
+import { getAutopilotRuntimeStatus } from "./runtime-config.js";
+
+/**
+ * Autopilot is opt-in: enabled when `JEV_AUTOPILOT=1`/`true`, or when enabled
+ * persistently in `~/.mcp-jev/config.json` (via Live Radar `:4399` or
+ * `jev-codeguard autopilot-mode on` / `jev-codeguard setup --autopilot`).
+ */
 export function isAutopilotEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const raw = (env.JEV_AUTOPILOT ?? "").trim().toLowerCase();
-  return raw === "1" || raw === "true";
+  return getAutopilotRuntimeStatus(env).enabled;
 }
